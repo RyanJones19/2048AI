@@ -7,12 +7,13 @@ import math
 import copy
 pygame.font.init()
 
-
+# Set pixel values for the game window
 WIN_WIDTH = 1000
 WIN_HEIGHT = 1000
 TILE_WIDTH = 28
 TILE_HEIGHT = 32
 
+# Load images
 BOARD_IMAGE = pygame.image.load(os.path.join("imgs", "BaseBoard.png"))
 TILE_0 = pygame.image.load(os.path.join("imgs", "0.png"))
 TILE_2 = pygame.image.load(os.path.join("imgs", "2.png"))
@@ -31,6 +32,7 @@ STAT_FONT = pygame.font.SysFont("comicsans", 50)
 
 position_map = {}
 
+# Create a dictionary that maps each tile to its position on the board (pixel values)
 for i in range(16):
     row = i // 4
     col = i % 4
@@ -38,6 +40,7 @@ for i in range(16):
     y = 32 + row * 242
     position_map[str(i+1)] = {"row": row, "col": col, "x": x, "y": y}
 
+# Create a dictionary that maps each tile to its corresponding image
 integer_to_image_map = {
     0: TILE_0,
     2: TILE_2,
@@ -53,6 +56,7 @@ integer_to_image_map = {
     2048: TILE_2048
 }
 
+
 class Game:
     def __init__(self):
         self.score = 0
@@ -62,22 +66,34 @@ class Game:
 
     def draw_window(self):
         pygame.display.update()
-        
+
 
 class Board:
     def __init__(self, win):
         self.win = win
         self.draw()
-        self.board = [[Tile(0, position_map[str(i*4+j+1)]["x"], position_map[str(i*4+j+1)]["y"]) for j in range(4)] for i in range(4)]
+        # Tile class takes in value, row, and col
+        # 0 represents an empty tile
+        # Set the coordinates of each tile on the board
+        # 4*i+j+1 represents the tile number, done like this because of the 2D list
+        self.board = [[Tile(0, position_map[str(4*i+j+1)]["x"], position_map[str(4*i+j+1)]["y"]) for j in range(4)] for i in range(4)]
         for row in self.board:
             for tile in row:
                 tile.draw(self.win)
+        # Add two 2 or 4 tiles to random places on the board
         random_starting_tiles = random.sample(range(1, 17), 2)
         self.add_tile(self.select_two_or_four(), random_starting_tiles[0])
         self.add_tile(self.select_two_or_four(), random_starting_tiles[1])
 
     def select_two_or_four(self):
         return random.choice([2, 4])
+
+    def print_board(self):
+        for row in self.board:
+            for tile in row:
+                print(tile.value, end=" ")
+            print()
+        #time.sleep(2)
 
 
     def add_tile(self, value, position):
@@ -106,12 +122,25 @@ class Board:
         for row in self.board:
             for tile in row:
                 tile.draw(self.win)
-            
+
+    def do_move(self):
+        self.update_board()
+        self.add_tile(self.select_two_or_four(), self.select_random_empty_tile())
+        pygame.display.update()
+
+    # Function to draw the game board
     def draw(self):
         self.win.blit(BOARD_IMAGE, (0, 0))
 
+    # Function to move the tiles left
+    # Returns if the board changed and the number of merges we made
+    # First finds all zeros in a row and moves them to the end
+    # If the new row is different from the old row, we know the board changed
+    # Then, we check if two adjacent tiles are the same and merge them
+    # We then move all zeros to the end again since tiles have been merged
     def move_left(self, board):
         changed = False
+        merged_count = 0
 
         for row in board:
             old_row = row[:]
@@ -123,30 +152,36 @@ class Board:
                 if row[tile].value == row[tile + 1].value and row[tile].value != 0:
                     row[tile].value *= 2
                     row[tile + 1].value = 0
+                    merged_count += 1
                     changed = True
             zeros = [tile for tile in row if tile.value == 0]
             row[:] = [tile for tile in row if tile.value != 0] + zeros
 
-        return changed
+        return changed, merged_count
 
+    # Function to move right, to move right we reverse the board, move left, then reverse it back
     def move_right(self, board):
         reversed_board = [row[::-1] for row in board]
-        changed = self.move_left(reversed_board)
+        changed, merged_count = self.move_left(reversed_board)
         self.board = [row[::-1] for row in reversed_board]
-        return changed
+        return changed, merged_count
 
+    # Function to move up, to move up we transpose the board, move left, then transpose it back
     def move_up(self, board):
+        # Zip function transposes the board by taking the first element of each row and making it a new row, * operator unpacks the list
         transposed_board = list(map(list, zip(*board)))
-        changed = self.move_left(transposed_board)
+        changed, merged_count = self.move_left(transposed_board)
         self.board = list(map(list, zip(*transposed_board)))
-        return changed
+        return changed, merged_count
 
+    # Function to move down, to move down we transpose the board, move right, then transpose it back
     def move_down(self, board):
         reversed_transposed_board = list(map(list, zip(*board[::-1])))
-        changed = self.move_left(reversed_transposed_board)
+        changed, merged_count = self.move_left(reversed_transposed_board)
         self.board = list(map(list, zip(*reversed_transposed_board)))[::-1]
-        return changed
+        return changed, merged_count
 
+    # Function to use when a move failed, try all moves in below order
     def try_all_moves(self, board):
         if self.move_left(board) or self.move_right(board) or self.move_up(board) or self.move_down(board):
             self.update_board()
@@ -156,19 +191,24 @@ class Board:
         else:
             return False
 
+    # Try moves in the "suggested order" from the NN output
     def try_next_move(self, board, suggested_order):
         for move in suggested_order:
             if move == 0:
-                if self.move_left(board):
+                changed, _ = self.move_left(board)
+                if changed:
                     return True
             elif move == 1:
-                if self.move_right(board):
+                changed, _ = self.move_right(board)
+                if changed:
                     return True
             elif move == 2:
-                if self.move_up(board):
+                changed, _ = self.move_up(board)
+                if changed:
                     return True
             elif move == 3:
-                if self.move_down(board):
+                changed, _ = self.move_down(board)
+                if changed:
                     return True
         return False
 
@@ -182,7 +222,7 @@ class Board:
         return max_tile
 
     def count_zeros(self,board):
-        zeros = 0
+        zeros = 1
         for row in board:
             for tile in row:
                 if tile.value == 0:
@@ -201,7 +241,7 @@ class Board:
                 else:
                     if board[row][tile].value == board[row][tile+1].value or board[row][tile].value == board[row][tile+1].value*2:
                         smoothness += 1
-        print("Smoothness was ", smoothness)
+        print("Smoothness was: ", smoothness)
         return smoothness
 
     def calculate_board_state_fitness(self, board):
@@ -210,7 +250,7 @@ class Board:
         for row_position, row in enumerate(board):
             for tile_position, tile in enumerate(row):
                 fitness += tile.value * positional_weights[row_position][tile_position]
-        print("Fitness was ", fitness)
+        print("Fitness added was: ", fitness)
         return fitness * self.count_zeros(board) * self.calculate_board_smoothness(board)
 
 
@@ -224,36 +264,27 @@ class Tile:
     def draw(self, win):
         tile_img = integer_to_image_map[self.value]
         win.blit(tile_img, (self.row, self.col))
-        
+
 
 def game_loop(genomes, config):
     game = Game()
-    could_move_left = True
-    could_move_right = True
-    could_move_up = True
-    could_move_down = True
     max_tile = 0
 
     nets = []
     ge = []
     games = []
-    #scores = []
-    #time.sleep(10)
 
+    # Create a list of genomes, neural networks and games
     for _, g in genomes:
         net = neat.nn.FeedForwardNetwork.create(g, config)
         nets.append(net)
         game = Game()
         games.append(game)
-        #scores.append(0)
         g.fitness = 0
         ge.append(g)
 
-    #while game.run:
     run = True
     while run:
-        #print("Finished trying to move in all 50 Games")
-        #time.sleep(3)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 run = False
@@ -261,337 +292,166 @@ def game_loop(genomes, config):
                 quit()
 
         print("Number of remaining games in species: ", len(games))
-        #print(could_move_left, could_move_right, could_move_up, could_move_down)
         if len(games) == 0:
             run = False
             print("MAX TILE THIS GAME:", max_tile)
             time.sleep(5)
             break
         for x, game in enumerate(games):
-            #time.sleep(1)
-            print(x)
-            print(len(ge))
-            print(len(games))
+            print("GAME NUMBER: ", x)
+            print("REMAINING GAMES: ", len(ge))
             game.draw_window()
-            ge[x].fitness += 1
-            output = nets[x].activate((game.board.board[0][0].value, 
-                                       game.board.board[0][1].value, 
-                                       game.board.board[0][2].value, 
-                                       game.board.board[0][3].value, 
-                                       game.board.board[1][0].value, 
-                                       game.board.board[1][1].value, 
-                                       game.board.board[1][2].value, 
-                                       game.board.board[1][3].value, 
-                                       game.board.board[2][0].value, 
-                                       game.board.board[2][1].value, 
-                                       game.board.board[2][2].value, 
-                                       game.board.board[2][3].value, 
-                                       game.board.board[3][0].value, 
-                                       game.board.board[3][1].value, 
-                                       game.board.board[3][2].value, 
+            # Every time we make a move, add to fitness
+            ge[x].fitness += 500
+            # Get the output from the neural network
+            output = nets[x].activate((game.board.board[0][0].value,
+                                       game.board.board[0][1].value,
+                                       game.board.board[0][2].value,
+                                       game.board.board[0][3].value,
+                                       game.board.board[1][0].value,
+                                       game.board.board[1][1].value,
+                                       game.board.board[1][2].value,
+                                       game.board.board[1][3].value,
+                                       game.board.board[2][0].value,
+                                       game.board.board[2][1].value,
+                                       game.board.board[2][2].value,
+                                       game.board.board[2][3].value,
+                                       game.board.board[3][0].value,
+                                       game.board.board[3][1].value,
+                                       game.board.board[3][2].value,
                                        game.board.board[3][3].value))
             print(output)
             board_max_tile = game.board.calculate_max_tile(game.board.board)
             if board_max_tile > max_tile:
                 max_tile = board_max_tile
-                
-            # get the index of the max value in the output list if there are equal values in the list, the first one is returned
-            max_index = output.index(max(output))
+                ge[x].fitness = ge[x].fitness * 2
+                print(max_tile)
+
+            if board_max_tile >= 512:
+                print("Game Number: ", x)
+                print("CURRENT FITNESS: ", ge[x].fitness)
+                game.board.print_board()
+
             # create a new list containing the values 0 through 3 ordered based on the output index list
             # for example if index 2 is largest and index 1 is second largest the list would be [2,1,0,3]
-            suggested_moves = sorted(range(len(output)), key=lambda k: output[k], reverse=True)
+            # if multiple values are the same randomize the order of the same values
+            suggested_moves = sorted(range(len(output)), key=lambda k: (output[k], random.random()), reverse=True)
             print(suggested_moves)
-            #if output[0] > 0.5:
+            max_index = suggested_moves[0]
+
             if max_index == 0:
-                print("Trying to move left")
-                # Create a copy of the game board that can be compared to the board after the move
-                boardBeforeMove = copy.deepcopy(game.board.board)
-
-                # print the game board before the move in 4x4 as text
-                #for row in boardBeforeMove:
-                #    for tile in row:
-                #        print(tile.value, end=" ")
-                #    print()
-
-                #numMerges = 0
-                # Starting in the upper left corner, compare each tile to the tile to its right if their values match add one to numMerges
-                #for row in range(4):
-                #    for col in range(3):
-                #        if game.board.board[row][col].value == game.board.board[row][col+1].value:
-                #            numMerges += 1
-
-                #print("=====================================")
-                could_move_left = game.board.move_left(game.board.board)
-                print("Could move left: ", could_move_left)
-                # print the game board after the move
-                #for row in game.board.board:
-                #    for tile in row:
-                #        print(tile.value, end=" ")
-                #    print()
-                # if the tile in the upper left corner after the move is the same or larger add 5 to the fitness
-                #if game.board.board[0][0].value >= boardBeforeMove[0][0].value:
-                #    try:
-                #        ge[x].fitness += 3
-                #    except:
-                #        continue
-
-                # if the tile in the upper left is the largest tile on the board add 10 to the fitness
-                #largest_tile = True
-                #for row in game.board.board:
-                #    for tile in row:
-                #        if tile.value > game.board.board[0][0].value:
-                #            largest_tile = False
-                #            break
-                #if largest_tile:
-                #    ge[x].fitness += 5
+                print("Trying to move left...")
+                could_move_left, num_merges = game.board.move_left(game.board.board)
 
                 if could_move_left:
-                    #scores[x] += 1
                     try:
-                        #ge[x].fitness += numMerges
-                        ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) + 50
+                        print("Moved left and merged ", num_merges, " tiles")
+                        ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) * num_merges
                     except:
                         continue
-                    #print("UPDATING BOARD")
-                    #time.sleep(2)
-                    game.board.update_board()
-                    game.board.add_tile(game.board.select_two_or_four(), game.board.select_random_empty_tile())
-                    pygame.display.update()
-                    could_move_left, could_move_right, could_move_up, could_move_down = True, True, True, True
+                    game.board.do_move()
                 else:
-                    #could_move_left = False
-                    print("LEFT: INCORRECT")
-                    #try:
-                    #    ge[x].fitness -= 1
-                    #except:
-                    #    continue
-                    #if not game.board.try_all_moves(game.board.board):
+                    print("Tried to move left but couldn't")
+                    ge[x].fitness -= 100000
+                    game.board.print_board()
+
+                    # Attempt to move the next best direction if recommended failed
                     if game.board.try_next_move(game.board.board, suggested_moves):
-                        game.board.update_board()
-                        game.board.add_tile(game.board.select_two_or_four(), game.board.select_random_empty_tile())
-                        pygame.display.update()
+                        game.board.do_move()
+                    # If we can move no direction then the game is over and remove high fitness
                     else:
-                        ge[x].fitness -= 500
+                        ge[x].fitness -= 500000
                         nets.pop(x)
                         ge.pop(x)
                         games.pop(x)
                         print("GAME OVER, REMOVED GAME")
-                        #time.sleep(5)
-                    #nets.pop(x)
-                    #ge.pop(x)
-                    #games.pop(x)
-                    #print("Game completed with score: ", scores[x])
-                    #scores.pop(x)
-            #elif output[1] > 0.5:
+
             elif max_index == 1:
-                print("Trying to move right")
-                #numMerges = 0
-                # Starting in the upper left corner, compare each tile to the tile to its right if their values match add one to numMerges
-                #for row in range(4):
-                #    for col in range(3):
-                #        if game.board.board[row][col].value == game.board.board[row][col+1].value and game.board.board[row][col].value != 0:
-                #            numMerges += 1
-                could_move_right = game.board.move_right(game.board.board)
-
-                if(game.board.board[0][0].value == 0):
-                    ge[x].fitness -= 5
-                elif(game.board.board[0][0].value == 2 or game.board.board[0][0] == 4):
-                    ge[x].fitness -= 100
-                print("Could move right? ", could_move_right)
-
-                #if game.board.board[0][0].value != 0:
-                #    ge[x].fitness += 3
+                print("Trying to move right...")
+                could_move_right, num_merges = game.board.move_right(game.board.board)
 
                 if could_move_right:
-                    #scores[x] += 1
                     try:
-                        #ge[x].fitness += 0.5*numMerges
-                        ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board)
+                        print("Moved right and merged ", num_merges, " tiles")
+                        ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) * num_merges
                     except:
                         continue
-                    game.board.update_board()
-                    game.board.add_tile(game.board.select_two_or_four(), game.board.select_random_empty_tile())
-                    pygame.display.update()
-                    could_move_left, could_move_right, could_move_up, could_move_down = True, True, True, True
+                    game.board.do_move()
                 else:
-                    #could_move_right = False
-                    print("RIGHT: INCORRECT")
-                    #try:
-                        #ge[x].fitness -= 1
-                    #except:
-                    #    continue
-                    #if not game.board.try_all_moves(game.board.board):
+                    print("Tried to move right but couldn't")
+                    ge[x].fitness -= 100000
+                    game.board.print_board()
+
+                    # Attempt to move the next best direction if recommended failed
                     if game.board.try_next_move(game.board.board, suggested_moves):
-                        game.board.update_board()
-                        game.board.add_tile(game.board.select_two_or_four(), game.board.select_random_empty_tile())
-                        pygame.display.update()
+                        game.board.do_move()
+                    # If we can move no direction then the game is over and remove high fitness
                     else:
-                        ge[x].fitness -= 500
+                        ge[x].fitness -= 500000
                         nets.pop(x)
                         ge.pop(x)
                         games.pop(x)
                         print("GAME OVER, REMOVED GAME")
-                        #time.sleep(5)
-                    #nets.pop(x)
-                    #ge.pop(x)
-                    #games.pop(x)
-                    #print("Game completed with score: ", scores[x])
-                    #scores.pop(x)
-            #elif output[2] > 0.5:
+
             elif max_index == 2:
-                print("Trying to move up")
-                #numMerges = 0
-                # Starting in the upper left corner, compare each tile to the tile directly below it if their values match add one to numMerges
-                #for row in range(3):
-                #    for col in range(4):
-                #        if game.board.board[row][col].value == game.board.board[row+1][col].value:
-                #            numMerges += 1
-                could_move_up = game.board.move_up(game.board.board)
-                print("Could move up? ", could_move_up)
+                print("Trying to move up...")
+                could_move_up, num_merges = game.board.move_up(game.board.board)
+
                 if could_move_up:
-                    #scores[x] += 1
                     try:
-                        #ge[x].fitness += numMerges
-                        ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) + 50
+                        print("Moved up and merged ", num_merges, " tiles")
+                        ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) * num_merges
                     except:
                         continue
-                    game.board.update_board()
-                    game.board.add_tile(game.board.select_two_or_four(), game.board.select_random_empty_tile())
-                    pygame.display.update()
-                    could_move_left, could_move_right, could_move_up, could_move_down = True, True, True, True
+                    game.board.do_move()
                 else:
-                    #could_move_up = False
-                    print("UP: INCORRECT")
-                    #try:
-                        #ge[x].fitness -= 1
-                    #except:
-                    #    continue
-                    #if not game.board.try_all_moves(game.board.board):
+                    print("Tried to move up but couldn't")
+                    ge[x].fitness -= 100000
+                    game.board.print_board()
+
+                    # Attempt to move the next best direction if recommended failed
                     if game.board.try_next_move(game.board.board, suggested_moves):
-                        game.board.update_board()
-                        game.board.add_tile(game.board.select_two_or_four(), game.board.select_random_empty_tile())
-                        pygame.display.update()
+                        game.board.do_move()
+                    # If we can move no direction then the game is over and remove high fitness
                     else:
-                        ge[x].fitness -= 500
+                        ge[x].fitness -= 500000
                         nets.pop(x)
                         ge.pop(x)
                         games.pop(x)
                         print("GAME OVER, REMOVED GAME")
-                        #time.sleep(5)
-
-                    #nets.pop(x)
-                    #ge.pop(x)
-                    #games.pop(x)
-                    #print("Game completed with score: ", scores[x])
-                    #scores.pop(x)
-            #elif output[3] > 0.5:
             elif max_index == 3:
-                print("Trying to move down")
-                #numMerges = 0
-                # Starting in the upper left corner, compare each tile to the tile directly below it if their values match add one to numMerges
-                #for row in range(3):
-                #    for col in range(4):
-                #        if game.board.board[row][col].value == game.board.board[row+1][col].value and game.board.board[row][col].value != 0:
-                #            numMerges += 1
-                could_move_down = game.board.move_down(game.board.board)
+                print("Trying to move down...")
+                could_move_down, num_merges = game.board.move_down(game.board.board)
 
-                if(game.board.board[0][0].value == 0):
-                    ge[x].fitness -= 1000
-                elif(game.board.board[0][0].value == 2 or game.board.board[0][0] == 4):
-                    ge[x].fitness -= 5000
-                print("Could move down? ", could_move_down)
-                # after moving down if the tile in the upper left corner did not move then add 3 to the fitness
-                #if game.board.board[0][0].value != 0:
-                #    ge[x].fitness += 3
                 if could_move_down:
-                    #scores[x] += 1
                     try:
-                        #ge[x].fitness -= 0.25*numMerges
-                        ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board)
+                        print("Moved down and merged ", num_merges, " tiles")
+                        ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) * num_merges
                     except:
                         continue
-                    game.board.update_board()
-                    game.board.add_tile(game.board.select_two_or_four(), game.board.select_random_empty_tile())
-                    pygame.display.update()
-                    could_move_left, could_move_right, could_move_up, could_move_down = True, True, True, True
+                    game.board.do_move()
                 else:
-                    #could_move_down = False
-                    print("DOWN: INCORRECT")
-                    #try:
-                        #ge[x].fitness -= 3
-                    #except:
-                    #    continue
-                    #if not game.board.try_all_moves(game.board.board):
+                    print("Tried to move down but couldn't")
+                    ge[x].fitness -= 100000
+                    game.board.print_board()
+
+                    # Attempt to move the next best direction if recommended failed
                     if game.board.try_next_move(game.board.board, suggested_moves):
-                        game.board.update_board()
-                        game.board.add_tile(game.board.select_two_or_four(), game.board.select_random_empty_tile())
-                        pygame.display.update()
+                        game.board.do_move()
+                    # If we can move no direction then the game is over and remove high fitness
                     else:
+                        ge[x].fitness -= 500000
                         nets.pop(x)
                         ge.pop(x)
                         games.pop(x)
                         print("GAME OVER, REMOVED GAME")
-                        #time.sleep(5)
-
-                    #nets.pop(x)
-                    #ge.pop(x)
-                    #games.pop(x)
-                    #print("Game completed with score: ", scores[x])
-                    #scores.pop(x)
-            elif not could_move_left and not could_move_right and not could_move_up and not could_move_down:
-                #print("Coult not move any direction")
-                #print("Game over")
-                #try:
-                #    ge[x].fitness -= 10
-                #except:
-                #    continue
-                ge[x].fitness -= 500
+            else:
+                ge[x].fitness -= 1000000
                 nets.pop(x)
                 ge.pop(x)
                 games.pop(x)
                 print("GAME OVER, REMOVED GAME")
                 time.sleep(5)
-
-                #print("Game completed with score: ", scores[x])
-                #scores.pop(x)
-            else:
-                print("AI found no preferred direction to move, will try left, up, right, down")
-                if(game.board.move_left(game.board.board)):
-                    game.board.update_board()
-                    game.board.add_tile(game.board.select_two_or_four(), game.board.select_random_empty_tile())
-                    pygame.display.update()
-                    #could_move_left, could_move_right, could_move_up, could_move_down = True, True, True, True
-                    could_move_left = True
-                elif(game.board.move_up(game.board.board)):
-                    game.board.update_board()
-                    game.board.add_tile(game.board.select_two_or_four(), game.board.select_random_empty_tile())
-                    pygame.display.update()
-                    #could_move_left, could_move_right, could_move_up, could_move_down = True, True, True, True
-                    could_move_up = True
-                elif(game.board.move_right(game.board.board)):
-                    game.board.update_board()
-                    game.board.add_tile(game.board.select_two_or_four(), game.board.select_random_empty_tile())
-                    pygame.display.update()
-                    #could_move_left, could_move_right, could_move_up, could_move_down = True, True, True, True
-                    could_move_right = True
-                elif(game.board.move_down(game.board.board)):
-                    game.board.update_board()
-                    game.board.add_tile(game.board.select_two_or_four(), game.board.select_random_empty_tile())
-                    pygame.display.update()
-                    #could_move_left, could_move_right, could_move_up, could_move_down = True, True, True, True
-                    could_move_down = True
-                else:
-                    #print("Game over")
-                    #try:
-                    #    ge[x].fitness -=10
-                    #except:
-                    #    continue
-                    nets.pop(x)
-                    ge.pop(x)
-                    games.pop(x)
-                    print("GAME OVER, REMOVED GAME")
-                    #time.sleep(5)
-
 
 
         # Logic to manually play
