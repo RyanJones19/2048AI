@@ -246,7 +246,7 @@ class Board:
 
     def calculate_board_state_fitness(self, board):
         fitness = 0
-        positional_weights = [[16,15,14,13],[9,10,11,12],[8,7,6,5],[4,3,2,1]]
+        positional_weights = [[16**2,15**2,14**2,13**2],[9**2,10**2,11**2,12**2],[8**2,7**2,6**2,5**2],[4**2,3**2,2**2,1**2]]
         for row_position, row in enumerate(board):
             for tile_position, tile in enumerate(row):
                 fitness += tile.value * positional_weights[row_position][tile_position]
@@ -273,6 +273,7 @@ def game_loop(genomes, config):
     nets = []
     ge = []
     games = []
+    moves_list = []
 
     # Create a list of genomes, neural networks and games
     for _, g in genomes:
@@ -282,6 +283,7 @@ def game_loop(genomes, config):
         games.append(game)
         g.fitness = 0
         ge.append(g)
+        moves_list.append([])
 
     run = True
     while run:
@@ -298,13 +300,33 @@ def game_loop(genomes, config):
             time.sleep(5)
             break
         for x, game in enumerate(games):
+            game_removed = False
             print("GAME NUMBER: ", x)
             print("REMAINING GAMES: ", len(ge))
             game.draw_window()
             # Every time we make a move, add to fitness
             ge[x].fitness += 500
+            input_vector = []
+            for row_position, row in enumerate(game.board.board):
+                for tile_position, tile in enumerate(row):
+                # Encode the value of the tile using one-hot encoding
+                    tile_value_encoding = [0] * 11
+                    if tile.value != 0:
+                        tile_value_encoding[int(math.log2(tile.value))] = 1
+
+                    # Encode the position of the tile using one-hot encoding
+                    tile_position_encoding = [[0] * 4 for _ in range(4)]
+                    tile_position_encoding[row_position][tile_position] = 1
+
+                    # Combine the value and position encodings
+                    tile_encoding = tile_value_encoding + [value for row in tile_position_encoding for value in row]
+                    input_vector.extend(tile_encoding)
+            #print(tuple(input_vector))
+            print(input_vector)
+
+            output = nets[x].activate(input_vector)
             # Get the output from the neural network
-            output = nets[x].activate((game.board.board[0][0].value,
+            '''output = nets[x].activate((game.board.board[0][0].value,
                                        game.board.board[0][1].value,
                                        game.board.board[0][2].value,
                                        game.board.board[0][3].value,
@@ -319,7 +341,7 @@ def game_loop(genomes, config):
                                        game.board.board[3][0].value,
                                        game.board.board[3][1].value,
                                        game.board.board[3][2].value,
-                                       game.board.board[3][3].value))
+                                       game.board.board[3][3].value))'''
             print(output)
             board_max_tile = game.board.calculate_max_tile(game.board.board)
             if board_max_tile > max_tile:
@@ -331,6 +353,7 @@ def game_loop(genomes, config):
                 print("Game Number: ", x)
                 print("CURRENT FITNESS: ", ge[x].fitness)
                 game.board.print_board()
+                #time.sleep(5)
 
             # create a new list containing the values 0 through 3 ordered based on the output index list
             # for example if index 2 is largest and index 1 is second largest the list would be [2,1,0,3]
@@ -345,14 +368,19 @@ def game_loop(genomes, config):
 
                 if could_move_left:
                     try:
+
                         print("Moved left and merged ", num_merges, " tiles")
-                        ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) * num_merges
+                        if num_merges > 0:
+                            ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) * num_merges * 10
+                        else:
+                            ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board)
+                        moves_list[x].append(0)
                     except:
                         continue
                     game.board.do_move()
                 else:
                     print("Tried to move left but couldn't")
-                    ge[x].fitness -= 100000
+                    ge[x].fitness *= .75
                     game.board.print_board()
 
                     # Attempt to move the next best direction if recommended failed
@@ -360,10 +388,11 @@ def game_loop(genomes, config):
                         game.board.do_move()
                     # If we can move no direction then the game is over and remove high fitness
                     else:
-                        ge[x].fitness -= 500000
+                        ge[x].fitness *= .5
                         nets.pop(x)
                         ge.pop(x)
                         games.pop(x)
+                        game_removed = True
                         print("GAME OVER, REMOVED GAME")
 
             elif max_index == 1:
@@ -373,13 +402,17 @@ def game_loop(genomes, config):
                 if could_move_right:
                     try:
                         print("Moved right and merged ", num_merges, " tiles")
-                        ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) * num_merges
+                        if num_merges > 0:
+                            ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) * num_merges * 10
+                        else:
+                            ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board)
+                        moves_list[x].append(1)
                     except:
                         continue
                     game.board.do_move()
                 else:
                     print("Tried to move right but couldn't")
-                    ge[x].fitness -= 100000
+                    ge[x].fitness *= .75
                     game.board.print_board()
 
                     # Attempt to move the next best direction if recommended failed
@@ -387,10 +420,11 @@ def game_loop(genomes, config):
                         game.board.do_move()
                     # If we can move no direction then the game is over and remove high fitness
                     else:
-                        ge[x].fitness -= 500000
+                        ge[x].fitness *= .5
                         nets.pop(x)
                         ge.pop(x)
                         games.pop(x)
+                        game_removed = True
                         print("GAME OVER, REMOVED GAME")
 
             elif max_index == 2:
@@ -400,13 +434,17 @@ def game_loop(genomes, config):
                 if could_move_up:
                     try:
                         print("Moved up and merged ", num_merges, " tiles")
-                        ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) * num_merges
+                        if num_merges > 0:
+                            ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) * num_merges * 10
+                        else:
+                            ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board)
+                        moves_list[x].append(2)
                     except:
                         continue
                     game.board.do_move()
                 else:
                     print("Tried to move up but couldn't")
-                    ge[x].fitness -= 100000
+                    ge[x].fitness *= .75
                     game.board.print_board()
 
                     # Attempt to move the next best direction if recommended failed
@@ -414,10 +452,11 @@ def game_loop(genomes, config):
                         game.board.do_move()
                     # If we can move no direction then the game is over and remove high fitness
                     else:
-                        ge[x].fitness -= 500000
+                        ge[x].fitness *= .5
                         nets.pop(x)
                         ge.pop(x)
                         games.pop(x)
+                        game_removed = True
                         print("GAME OVER, REMOVED GAME")
             elif max_index == 3:
                 print("Trying to move down...")
@@ -426,13 +465,18 @@ def game_loop(genomes, config):
                 if could_move_down:
                     try:
                         print("Moved down and merged ", num_merges, " tiles")
-                        ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) * num_merges
+                        # Multiply by 10*num_merges if number of merges is greater than 0
+                        if num_merges > 0:
+                            ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board) * num_merges * 10
+                        else:
+                            ge[x].fitness += game.board.calculate_board_state_fitness(game.board.board)
+                        moves_list[x].append(3)
                     except:
                         continue
                     game.board.do_move()
                 else:
                     print("Tried to move down but couldn't")
-                    ge[x].fitness -= 100000
+                    ge[x].fitness *= .75
                     game.board.print_board()
 
                     # Attempt to move the next best direction if recommended failed
@@ -440,19 +484,21 @@ def game_loop(genomes, config):
                         game.board.do_move()
                     # If we can move no direction then the game is over and remove high fitness
                     else:
-                        ge[x].fitness -= 500000
+                        ge[x].fitness *= .5
                         nets.pop(x)
                         ge.pop(x)
                         games.pop(x)
+                        game_removed = True
                         print("GAME OVER, REMOVED GAME")
-            else:
-                ge[x].fitness -= 1000000
-                nets.pop(x)
-                ge.pop(x)
-                games.pop(x)
-                print("GAME OVER, REMOVED GAME")
-                time.sleep(5)
 
+            if len(moves_list[x]) == 25:
+                moves_list[x].pop(0)
+            if len(set(moves_list[x])) < 4 and game_removed == False:
+                ge[x].fitness *= .5
+                print("Fitness set to 0 because we do not have enough variance in moves")
+                continue
+            elif game_removed == False and ge[x].fitness > 0:
+                ge[x].fitness += ge[x].fitness * .1
 
         # Logic to manually play
         '''game.draw_window()
